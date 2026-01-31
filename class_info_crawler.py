@@ -15,7 +15,7 @@ class PKUElectiveCrawler:
         # 需要替换"Cookie"字段为有效的 Cookie"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-            "Cookie": "route=07f87a6dd7991fea2138ca0175e04553; _webvpn_key=eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoiMjIwMDAxMzE1MyIsImlhdCI6MTc2ODM3NDUzOCwiZXhwIjoxNzY4NDYwOTM4fQ.U0s2nSzAfYbDwAxTYF-AluCZp8ioS_VyqZ1rnCufgtk; webvpn_username=2200013153%7C1768374538%7C3eb6ce063ef40157c76cee769924f1c08ff3c8da; SWSPT=JgHgYSUuwTAe8t9NHuTqZvCGEWaiym39Pr5VqirQlVjQik3JreK2g2il0MSD4+jOuU0VMUqi7VGgl1gFtOQGenS730tCdHV0a7VRzT/Yp78=; JSESSIONID=jTkCp2NRGfBmhj0NnvwbgqjCk62JFLsX84ttGp9Pfnnv7fdtbKXn!480051555",
+            "Cookie": "玛卡巴卡，阿卡，哇卡，米卡，玛卡，呣！玛卡 巴卡，阿巴，雅卡，伊卡，阿卡，噢！ 哈姆，达姆，阿卡，磅。咿呀呦～玛卡巴卡，阿卡，阿卡，哇卡，呣！",
             "Referer": "https://elective.pku.edu.cn/elective2008/edu/pku/stu/elective/controller/electiveWork/ElectiveWorkController.jpf",
         }
 
