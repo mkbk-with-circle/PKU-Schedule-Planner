@@ -51,7 +51,7 @@ python class_info_crawler.py
 
 ##### 关于 `User-Agent` 与 `Referer`（建议问ai来设置，并非最关键的字样）
 
-在 `class_info_crawler.py` 里我们使用了 HTTP 请求头（Headers）来模拟浏览器访问，主要涉及两个字段：
+在 `class_info_crawler.py` 里我们使用了 HTTP 请求头（Headers）来模拟浏览器访问，主要涉及两个字段（`User-Agent`可以问一下自己的ai怎么改，`Referer`应该不需要修改）：
 
 **1) `User-Agent`：告诉服务器“我是什么浏览器”**
 - **作用**：让请求看起来更像来自真实浏览器，降低被拦截/返回异常页面的概率（某些系统会对 `python-requests/*` 这类默认 UA 更敏感）。
@@ -69,7 +69,7 @@ headers = {
 - **作用**：一些系统会检查 Referer 来做流程校验或 CSRF 防护；Referer 不对可能导致返回空数据、跳回登录、或提示会话失效。
 - **是否必须**：**有时必须**（尤其是选课这类带流程的页面），建议按真实请求链路设置。
 
-**推荐写法（示例）**：
+**示例写法**（应该直接使用这个就可以了，不需要改）：
 ```python
 headers = {
     "Referer": "https://elective.pku.edu.cn/elective2008/edu/pku/stu/elective/controller/electiveWork/ElectiveWorkController.jpf",
