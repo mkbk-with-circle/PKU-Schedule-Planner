@@ -1,7 +1,9 @@
 import argparse
+import json
+import os
 import tkinter as tk
-from tkinter import ttk, messagebox
-from typing import Dict, List, Tuple, Set, Optional
+from tkinter import ttk, messagebox, filedialog
+from typing import Dict, List, Tuple, Set, Optional, Any
 
 from pku_course_parser import load_courses, Course
 
@@ -27,10 +29,16 @@ def build_occupied_cells_for_course(c: Course) -> Set[Tuple[int, int, int]]:
 
 
 class CourseUI(tk.Tk):
+    CONFIG_VERSION = 1
+
     def __init__(self, xlsx_path: str, sheet_name: str):
         super().__init__()
         self.title("选课课表（第二阶段 UI）")
         self.geometry("1400x820")
+
+        # 保存源信息，写入配置文件里（用于提示，不强制校验）
+        self.source_file = xlsx_path
+        self.source_sheet = sheet_name
 
         self.res = load_courses(xlsx_path, sheet_name=sheet_name, debug=False)
         self.by_uid: Dict[Tuple[str, str], Course] = self.res.by_uid
@@ -38,9 +46,7 @@ class CourseUI(tk.Tk):
 
         # 已选 / 冲突
         self.selected: Set[Tuple[str, str]] = set()
-        self.conflicted: Set[Tuple[str, str]] = (
-            set()
-        )  # ✅ 新增：冲突课程集合（不进课表）
+        self.conflicted: Set[Tuple[str, str]] = set()
 
         self.occ_cache: Dict[Tuple[str, str], Set[Tuple[int, int, int]]] = {
             uid: build_occupied_cells_for_course(c) for uid, c in self.by_uid.items()
@@ -52,7 +58,7 @@ class CourseUI(tk.Tk):
 
         self.unselected_iid_to_uid: Dict[str, Tuple[str, str]] = {}
         self.selected_iid_to_uid: Dict[str, Tuple[str, str]] = {}
-        self.conflicted_iid_to_uid: Dict[str, Tuple[str, str]] = {}  # ✅ 新增
+        self.conflicted_iid_to_uid: Dict[str, Tuple[str, str]] = {}
 
         self._init_style()
         self._build_layout()
@@ -121,15 +127,15 @@ class CourseUI(tk.Tk):
         self.unselected_tree.configure(yscrollcommand=unselected_scroll.set)
         unselected_scroll.grid(row=4, column=1, sticky="ns")
 
-        # 中：课表 + 两行工具栏（关键：不再挤掉学分入口）
+        # 中：课表 + 工具栏
         mid = ttk.Frame(self, padding=10)
         mid.grid(row=0, column=1, sticky="nsew")
         mid.columnconfigure(0, weight=1)
-        mid.rowconfigure(3, weight=1)
+        mid.rowconfigure(4, weight=1)
 
         toolbar = ttk.Frame(mid, style="Toolbar.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.columnconfigure(2, weight=1)  # 让周次标题区可伸缩
+        toolbar.columnconfigure(2, weight=1)
 
         ttk.Button(toolbar, text="<< 上一周", command=self._prev_week).grid(
             row=0, column=0, padx=(0, 6)
@@ -148,9 +154,21 @@ class CourseUI(tk.Tk):
             row=0, column=4
         )
 
-        # 第二行：学分上限 + 应用 + 状态（保证始终可见）
+        # 第二行：导入/导出
+        io_row = ttk.Frame(mid)
+        io_row.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        io_row.columnconfigure(2, weight=1)
+
+        ttk.Button(io_row, text="导入配置…", command=self._import_config).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Button(io_row, text="导出配置…", command=self._export_config).grid(
+            row=0, column=1, sticky="w", padx=(8, 0)
+        )
+
+        # 第三行：学分上限 + 状态
         credit_row = ttk.Frame(mid)
-        credit_row.grid(row=1, column=0, sticky="ew", pady=(6, 6))
+        credit_row.grid(row=2, column=0, sticky="ew", pady=(6, 6))
         credit_row.columnconfigure(4, weight=1)
 
         ttk.Label(credit_row, text="学分上限：").grid(row=0, column=0, sticky="w")
@@ -165,8 +183,9 @@ class CourseUI(tk.Tk):
         self.credit_status = ttk.Label(credit_row, text="", style="Hint.TLabel")
         self.credit_status.grid(row=0, column=4, sticky="e")
 
+        # 课表网格
         self.table_frame = ttk.Frame(mid)
-        self.table_frame.grid(row=3, column=0, sticky="nsew")
+        self.table_frame.grid(row=4, column=0, sticky="nsew")
         self.table_frame.rowconfigure(0, weight=1)
         self.table_frame.columnconfigure(0, weight=1)
         self._build_timetable_grid()
@@ -175,10 +194,9 @@ class CourseUI(tk.Tk):
         right = ttk.Frame(self, padding=10)
         right.grid(row=0, column=2, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(2, weight=1)  # 已选列表可伸缩
-        right.rowconfigure(7, weight=1)  # 冲突列表可伸缩
+        right.rowconfigure(2, weight=1)
+        right.rowconfigure(7, weight=1)
 
-        # --- 已选区 ---
         ttk.Label(right, text="已选课课程目录", style="Title.TLabel").grid(
             row=0, column=0, sticky="w"
         )
@@ -194,12 +212,10 @@ class CourseUI(tk.Tk):
         self.selected_tree.configure(yscrollcommand=selected_scroll.set)
         selected_scroll.grid(row=2, column=1, sticky="ns")
 
-        # --- 分隔 ---
         ttk.Separator(right, orient="horizontal").grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(10, 8)
         )
 
-        # --- 冲突区 ---
         ttk.Label(right, text="冲突课程目录", style="Title.TLabel").grid(
             row=4, column=0, sticky="w"
         )
@@ -223,7 +239,6 @@ class CourseUI(tk.Tk):
         conflicted_scroll.grid(row=7, column=1, sticky="ns")
 
     def _make_course_tree(self, parent: ttk.Frame) -> ttk.Treeview:
-        # ✅ 增加“学分”列
         tree = ttk.Treeview(
             parent,
             columns=("name", "teacher", "classno", "credits"),
@@ -313,7 +328,7 @@ class CourseUI(tk.Tk):
         for uid, c in self.by_uid.items():
             if uid in self.selected:
                 continue
-            if uid in self.conflicted:  # ✅ 冲突列表也视为“已处理”，不出现在未选
+            if uid in self.conflicted:
                 continue
             if dept != "全部" and (c.department or "").strip() != dept:
                 continue
@@ -360,6 +375,126 @@ class CourseUI(tk.Tk):
         total = self._current_total_credits()
         limit = float(self.credit_limit_var.get() or 0.0)
         self.credit_status.config(text=f"已选总学分：{total:g} / 上限：{limit:g}")
+
+    # -------------------------
+    # Config import/export
+    # -------------------------
+
+    @staticmethod
+    def _uid_to_str(uid: Tuple[str, str]) -> str:
+        # 用一个不太可能出现在字段里的分隔符
+        return f"{uid[0]}||{uid[1]}"
+
+    @staticmethod
+    def _str_to_uid(s: str) -> Tuple[str, str]:
+        a, b = s.split("||", 1)
+        return (a, b)
+
+    def _build_config_payload(self) -> Dict[str, Any]:
+        return {
+            "version": self.CONFIG_VERSION,
+            "source": {
+                "file": os.path.abspath(self.source_file),
+                "sheet": self.source_sheet,
+            },
+            "week": int(self.week_var.get()),
+            "credit_limit": float(self.credit_limit_var.get() or 0.0),
+            "selected": [self._uid_to_str(u) for u in sorted(self.selected)],
+            "conflicted": [self._uid_to_str(u) for u in sorted(self.conflicted)],
+        }
+
+    def _apply_config_payload(self, payload: Dict[str, Any]):
+        # 基础校验
+        if not isinstance(payload, dict):
+            raise ValueError("配置文件格式不正确（应为 JSON 对象）。")
+        if int(payload.get("version", 0)) != self.CONFIG_VERSION:
+            raise ValueError(f"配置文件版本不匹配：{payload.get('version')}")
+
+        selected_raw = payload.get("selected", [])
+        conflicted_raw = payload.get("conflicted", [])
+        if not isinstance(selected_raw, list) or not isinstance(conflicted_raw, list):
+            raise ValueError("配置文件格式不正确：selected/conflicted 必须为数组。")
+
+        selected_uids = [self._str_to_uid(x) for x in selected_raw]
+        conflicted_uids = [self._str_to_uid(x) for x in conflicted_raw]
+
+        # 过滤掉当前数据源不存在的 uid
+        missing_selected = [u for u in selected_uids if u not in self.by_uid]
+        missing_conflicted = [u for u in conflicted_uids if u not in self.by_uid]
+
+        selected_set = {u for u in selected_uids if u in self.by_uid}
+        conflicted_set = {u for u in conflicted_uids if u in self.by_uid}
+
+        # 保证互斥：已选优先
+        conflicted_set -= selected_set
+
+        # 应用
+        self.selected = selected_set
+        self.conflicted = conflicted_set
+
+        # 恢复一些 UI 状态（安全范围内）
+        try:
+            credit_limit = float(
+                payload.get("credit_limit", self.credit_limit_var.get())
+            )
+            if credit_limit > 0:
+                self.credit_limit_var.set(credit_limit)
+        except Exception:
+            pass
+
+        try:
+            week = int(payload.get("week", self.week_var.get()))
+            if WEEK_MIN <= week <= WEEK_MAX:
+                self.week_var.set(week)
+        except Exception:
+            pass
+
+        self._refresh_lists()
+        self._refresh_timetable()
+
+        # 提示缺失课程
+        if missing_selected or missing_conflicted:
+            msg_lines = ["部分课程在当前数据源中未找到，已自动忽略："]
+            if missing_selected:
+                msg_lines.append(f"\n- 已选缺失：{len(missing_selected)} 门")
+            if missing_conflicted:
+                msg_lines.append(f"\n- 冲突缺失：{len(missing_conflicted)} 门")
+            messagebox.showwarning("导入完成（有缺失）", "".join(msg_lines))
+
+    def _export_config(self):
+        default_name = "course_config.json"
+        path = filedialog.asksaveasfilename(
+            title="导出课表配置",
+            defaultextension=".json",
+            initialfile=default_name,
+            filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+
+        payload = self._build_config_payload()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            messagebox.showinfo("导出成功", f"已保存到：\n{path}")
+        except Exception as e:
+            messagebox.showerror("导出失败", f"无法写入文件：\n{path}\n\n错误：{e}")
+
+    def _import_config(self):
+        path = filedialog.askopenfilename(
+            title="导入课表配置",
+            filetypes=[("JSON 文件", "*.json"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            self._apply_config_payload(payload)
+            messagebox.showinfo("导入成功", f"已从配置恢复课表：\n{path}")
+        except Exception as e:
+            messagebox.showerror("导入失败", f"配置文件无法导入：\n{path}\n\n错误：{e}")
 
     # -------------------------
     # Refresh
@@ -438,7 +573,6 @@ class CourseUI(tk.Tk):
                 place = (m.room or c.key.room or "地点未知").strip()
                 for p in range(m.start_period, m.end_period + 1):
                     key = (p, daycol)
-                    # ✅ 课表里显示：课程名 / 老师 / 上课地点
                     grid_text.setdefault(key, []).append(
                         f"{c.course_name}\n{c.teacher}\n{place}"
                     )
@@ -552,9 +686,7 @@ class CourseUI(tk.Tk):
 
         for uid in uids_to_add:
             self.selected.add(uid)
-            self.conflicted.discard(
-                uid
-            )  # ✅ 保守处理：如果之前在冲突列表里，加入已选就移除冲突
+            self.conflicted.discard(uid)
 
         self._refresh_lists()
         self._refresh_timetable()
