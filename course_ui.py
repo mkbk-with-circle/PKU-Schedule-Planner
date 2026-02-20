@@ -36,7 +36,12 @@ class CourseUI(tk.Tk):
         self.by_uid: Dict[Tuple[str, str], Course] = self.res.by_uid
         self.all_courses: List[Course] = list(self.by_uid.values())
 
+        # 已选 / 冲突
         self.selected: Set[Tuple[str, str]] = set()
+        self.conflicted: Set[Tuple[str, str]] = (
+            set()
+        )  # ✅ 新增：冲突课程集合（不进课表）
+
         self.occ_cache: Dict[Tuple[str, str], Set[Tuple[int, int, int]]] = {
             uid: build_occupied_cells_for_course(c) for uid, c in self.by_uid.items()
         }
@@ -47,6 +52,7 @@ class CourseUI(tk.Tk):
 
         self.unselected_iid_to_uid: Dict[str, Tuple[str, str]] = {}
         self.selected_iid_to_uid: Dict[str, Tuple[str, str]] = {}
+        self.conflicted_iid_to_uid: Dict[str, Tuple[str, str]] = {}  # ✅ 新增
 
         self._init_style()
         self._build_layout()
@@ -165,12 +171,14 @@ class CourseUI(tk.Tk):
         self.table_frame.columnconfigure(0, weight=1)
         self._build_timetable_grid()
 
-        # 右：已选
+        # 右：已选 + 冲突
         right = ttk.Frame(self, padding=10)
         right.grid(row=0, column=2, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(2, weight=1)
+        right.rowconfigure(2, weight=1)  # 已选列表可伸缩
+        right.rowconfigure(7, weight=1)  # 冲突列表可伸缩
 
+        # --- 已选区 ---
         ttk.Label(right, text="已选课课程目录", style="Title.TLabel").grid(
             row=0, column=0, sticky="w"
         )
@@ -185,6 +193,34 @@ class CourseUI(tk.Tk):
         )
         self.selected_tree.configure(yscrollcommand=selected_scroll.set)
         selected_scroll.grid(row=2, column=1, sticky="ns")
+
+        # --- 分隔 ---
+        ttk.Separator(right, orient="horizontal").grid(
+            row=3, column=0, columnspan=2, sticky="ew", pady=(10, 8)
+        )
+
+        # --- 冲突区 ---
+        ttk.Label(right, text="冲突课程目录", style="Title.TLabel").grid(
+            row=4, column=0, sticky="w"
+        )
+        ttk.Label(
+            right, text="发生冲突时可暂存于此（不进课表）", style="Hint.TLabel"
+        ).grid(row=5, column=0, sticky="w", pady=(6, 6))
+
+        btn_row = ttk.Frame(right)
+        btn_row.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        btn_row.columnconfigure(0, weight=1)
+        ttk.Button(
+            btn_row, text="移除冲突", command=self._remove_conflicted_courses
+        ).grid(row=0, column=0, sticky="e")
+
+        self.conflicted_tree = self._make_course_tree(parent=right)
+        self.conflicted_tree.grid(row=7, column=0, sticky="nsew")
+        conflicted_scroll = ttk.Scrollbar(
+            right, orient="vertical", command=self.conflicted_tree.yview
+        )
+        self.conflicted_tree.configure(yscrollcommand=conflicted_scroll.set)
+        conflicted_scroll.grid(row=7, column=1, sticky="ns")
 
     def _make_course_tree(self, parent: ttk.Frame) -> ttk.Treeview:
         # ✅ 增加“学分”列
@@ -277,6 +313,8 @@ class CourseUI(tk.Tk):
         for uid, c in self.by_uid.items():
             if uid in self.selected:
                 continue
+            if uid in self.conflicted:  # ✅ 冲突列表也视为“已处理”，不出现在未选
+                continue
             if dept != "全部" and (c.department or "").strip() != dept:
                 continue
             uids.append(uid)
@@ -303,6 +341,18 @@ class CourseUI(tk.Tk):
         )
         return uids
 
+    def _conflicted_uids_sorted(self) -> List[Tuple[str, str]]:
+        uids = list(self.conflicted)
+        uids.sort(
+            key=lambda u: (
+                (self.by_uid[u].department or "").strip(),
+                self.by_uid[u].course_name.strip(),
+                self.by_uid[u].teacher.strip(),
+                (self.by_uid[u].class_no or "").strip(),
+            )
+        )
+        return uids
+
     def _current_total_credits(self) -> float:
         return sum(float(self.by_uid[uid].credits or 0.0) for uid in self.selected)
 
@@ -316,6 +366,7 @@ class CourseUI(tk.Tk):
     # -------------------------
 
     def _refresh_lists(self):
+        # 未选
         self.unselected_tree.delete(*self.unselected_tree.get_children())
         self.unselected_iid_to_uid.clear()
         for uid in self._filtered_unselected_uids():
@@ -332,6 +383,7 @@ class CourseUI(tk.Tk):
             )
             self.unselected_iid_to_uid[iid] = uid
 
+        # 已选
         self.selected_tree.delete(*self.selected_tree.get_children())
         self.selected_iid_to_uid.clear()
         for uid in self._selected_uids_sorted():
@@ -347,6 +399,23 @@ class CourseUI(tk.Tk):
                 ),
             )
             self.selected_iid_to_uid[iid] = uid
+
+        # 冲突
+        self.conflicted_tree.delete(*self.conflicted_tree.get_children())
+        self.conflicted_iid_to_uid.clear()
+        for uid in self._conflicted_uids_sorted():
+            c = self.by_uid[uid]
+            iid = self.conflicted_tree.insert(
+                "",
+                "end",
+                values=(
+                    c.course_name.strip(),
+                    c.teacher.strip(),
+                    f"{(c.class_no or '').strip()}",
+                    f"{float(c.credits or 0.0):g}",
+                ),
+            )
+            self.conflicted_iid_to_uid[iid] = uid
 
         self._update_credit_status()
 
@@ -460,7 +529,15 @@ class CourseUI(tk.Tk):
 
         conflict = self._find_conflict_between(uids_to_add)
         if conflict:
-            messagebox.showwarning("选课冲突", conflict)
+            ok = messagebox.askyesno(
+                "选课冲突",
+                conflict + "\n\n是否将这些课程加入【冲突课程列表】？（原有课表不变）",
+            )
+            if ok:
+                for uid in uids_to_add:
+                    if uid not in self.selected:
+                        self.conflicted.add(uid)
+                self._refresh_lists()
             return
 
         current = self._current_total_credits()
@@ -475,6 +552,9 @@ class CourseUI(tk.Tk):
 
         for uid in uids_to_add:
             self.selected.add(uid)
+            self.conflicted.discard(
+                uid
+            )  # ✅ 保守处理：如果之前在冲突列表里，加入已选就移除冲突
 
         self._refresh_lists()
         self._refresh_timetable()
@@ -491,6 +571,18 @@ class CourseUI(tk.Tk):
 
         self._refresh_lists()
         self._refresh_timetable()
+
+    def _remove_conflicted_courses(self):
+        uids_to_remove = self._get_tree_selected_uids(
+            self.conflicted_tree, self.conflicted_iid_to_uid
+        )
+        if not uids_to_remove:
+            return
+
+        for uid in uids_to_remove:
+            self.conflicted.discard(uid)
+
+        self._refresh_lists()
 
 
 def main() -> int:
